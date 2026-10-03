@@ -233,9 +233,12 @@ public class SimRecorder : MonoBehaviour
         {
             if (!obj.TryGetBounds(out Bounds b)) continue;
 
+            // 사람(스킨 메시): 현재 포즈 꼭짓점 전체, 그 외: bounds 8개 꼭짓점
+            if (!obj.TryGetPoseVertices(bboxPoints)) BoundsCorners(b, bboxPoints);
+
             var boxes = new List<string>();
-            if (TryBBox(cam1, b, out string b1)) boxes.Add("\"cam1\": " + b1);
-            if (TryBBox(cam2, b, out string b2)) boxes.Add("\"cam2\": " + b2);
+            if (TryBBox(cam1, bboxPoints, out string b1)) boxes.Add("\"cam1\": " + b1);
+            if (TryBBox(cam2, bboxPoints, out string b2)) boxes.Add("\"cam2\": " + b2);
             if (boxes.Count == 0) continue;   // 어느 카메라에도 안 보이면 기록하지 않음
 
             if (!first) sb.Append(", ");
@@ -248,17 +251,25 @@ public class SimRecorder : MonoBehaviour
         framesWriter.WriteLine(sb.ToString());
     }
 
-    /// <summary>bounds 8개 꼭짓점을 투영한 최소·최대. y는 위아래를 뒤집어 이미지 좌표로 만든다.</summary>
-    bool TryBBox(Camera cam, Bounds b, out string json)
+    readonly List<Vector3> bboxPoints = new List<Vector3>();
+
+    static void BoundsCorners(Bounds b, List<Vector3> points)
+    {
+        points.Clear();
+        Vector3 min = b.min, max = b.max;
+        for (int i = 0; i < 8; i++)
+            points.Add(new Vector3((i & 1) == 0 ? min.x : max.x, (i & 2) == 0 ? min.y : max.y, (i & 4) == 0 ? min.z : max.z));
+    }
+
+    /// <summary>월드 점들을 투영한 최소·최대. y는 위아래를 뒤집어 이미지 좌표로 만든다.</summary>
+    bool TryBBox(Camera cam, List<Vector3> points, out string json)
     {
         json = null;
         float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
         bool any = false;
-        Vector3 min = b.min, max = b.max;
-        for (int i = 0; i < 8; i++)
+        foreach (var p in points)
         {
-            var corner = new Vector3((i & 1) == 0 ? min.x : max.x, (i & 2) == 0 ? min.y : max.y, (i & 4) == 0 ? min.z : max.z);
-            Vector3 sp = cam.WorldToScreenPoint(corner);
+            Vector3 sp = cam.WorldToScreenPoint(p);
             if (sp.z <= 0f) continue;          // 카메라 뒤
             float y = Height - sp.y;
             minX = Mathf.Min(minX, sp.x); maxX = Mathf.Max(maxX, sp.x);

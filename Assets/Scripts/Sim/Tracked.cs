@@ -37,8 +37,43 @@ public class Tracked : MonoBehaviour
         }
     }
 
+    Mesh bakeMesh;
+    readonly List<Vector3> localVerts = new List<Vector3>();
+
     void OnEnable() { All.Add(this); }
     void OnDisable() { All.Remove(this); }
+    void OnDestroy() { if (bakeMesh != null) Destroy(bakeMesh); }
+
+    /// <summary>
+    /// SkinnedMeshRenderer가 있으면 현재 포즈를 BakeMesh로 구워 모든 꼭짓점을 월드 좌표로 담는다
+    /// (같은 오브젝트의 일반 MeshFilter 메시도 포함). 스킨 메시가 없으면 false — bounds 방식을 쓴다.
+    /// </summary>
+    public bool TryGetPoseVertices(List<Vector3> worldVerts)
+    {
+        worldVerts.Clear();
+        var skinned = GetComponentsInChildren<SkinnedMeshRenderer>();
+        if (skinned.Length == 0) return false;
+
+        if (bakeMesh == null) bakeMesh = new Mesh();
+        foreach (var smr in skinned)
+        {
+            if (!smr.enabled || smr.sharedMesh == null) continue;
+            smr.BakeMesh(bakeMesh, true);   // 스케일 포함, 위치·회전은 미적용
+            var t = smr.transform;
+            var m = Matrix4x4.TRS(t.position, t.rotation, Vector3.one);
+            bakeMesh.GetVertices(localVerts);
+            foreach (var v in localVerts) worldVerts.Add(m.MultiplyPoint3x4(v));
+        }
+        foreach (var mf in GetComponentsInChildren<MeshFilter>())
+        {
+            var r = mf.GetComponent<MeshRenderer>();
+            if (r == null || !r.enabled || mf.sharedMesh == null || !mf.sharedMesh.isReadable) continue;
+            var m = mf.transform.localToWorldMatrix;
+            mf.sharedMesh.GetVertices(localVerts);
+            foreach (var v in localVerts) worldVerts.Add(m.MultiplyPoint3x4(v));
+        }
+        return worldVerts.Count > 0;
+    }
 
     public bool TryGetBounds(out Bounds bounds)
     {
