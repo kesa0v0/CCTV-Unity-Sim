@@ -47,6 +47,18 @@ public class SimRecorder : MonoBehaviour
     public GameObject personPrefab;
     [Tooltip("Moving(bool) 파라미터를 가진 Animator Controller")]
     public RuntimeAnimatorController personController;
+    [Tooltip("카트 모델 프리팹(S2). 비우면 상자")]
+    public GameObject cartPrefab;
+    [Tooltip("백팩 모델 프리팹(S4, 피벗 무관 — 바닥에 자동 정렬). 비우면 기본 도형 백팩. bbox 정밀도를 위해 메시 Read/Write 켜기")]
+    public GameObject backpackPrefab;
+
+    [Header("Extra ground truth")]
+    [Tooltip("카메라별 가려짐 비율 visible_ratio 기록 (ID 마스크 추가 렌더링)")]
+    public bool recordVisibility = true;
+    [Tooltip("가려짐 계산 해상도 = 1920x1080 / 이 값")]
+    [Range(1, 4)] public int visibilityDownscale = 2;
+    [Tooltip("비우면 Hidden/Sim/IdMask")]
+    public Shader idMaskShader;
 
     const int Width = 1920, Height = 1080;
 
@@ -54,6 +66,7 @@ public class SimRecorder : MonoBehaviour
     RenderTexture rt;
     Texture2D tex;
     StreamWriter framesWriter;
+    VisibilityMeter visibility;
     int frame;            // 마지막으로 기록한 프레임 번호 (1부터)
     bool recording;
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -71,7 +84,7 @@ public class SimRecorder : MonoBehaviour
         foreach (var c in new[] { cam1, cam2 }) ConfigureCamera(c);
 
         if (furnitureRoot != null) Tracked.AutoAddChildren(furnitureRoot);
-        if (spawnPlaceholders) ScenarioBuilder.Build(scenario, spawnFurniturePlaceholders, personPrefab, personController);
+        if (spawnPlaceholders) ScenarioBuilder.Build(scenario, spawnFurniturePlaceholders, personPrefab, personController, cartPrefab, backpackPrefab);
 
         Time.captureFramerate = framerate;
     }
@@ -95,6 +108,16 @@ public class SimRecorder : MonoBehaviour
         cam2.targetTexture = rt;
 
         LogObjectSizes();
+        if (recordVisibility)
+        {
+            var sh = idMaskShader != null ? idMaskShader : Shader.Find("Hidden/Sim/IdMask");
+            if (sh == null) Debug.LogError("SimRecorder: Hidden/Sim/IdMask 셰이더를 찾을 수 없어 visible_ratio를 기록하지 않습니다.");
+            else visibility = new VisibilityMeter(sh, Width / visibilityDownscale, Height / visibilityDownscale);
+        }
+        if (scenario == SimScenario.S3 && frameCount != ScenarioBuilder.StaticPoints.Length * 3 * framerate)
+            Debug.LogWarning($"SimRecorder: S3는 {ScenarioBuilder.StaticPoints.Length}곳 × 3초 = {ScenarioBuilder.StaticPoints.Length * 3 * framerate}프레임입니다 (현재 frameCount={frameCount}).");
+        if (scenario == SimScenario.S4 && frameCount != 5 * 10 * framerate)
+            Debug.LogWarning($"SimRecorder: S4는 5구간 × 10초 = {5 * 10 * framerate}프레임입니다 (현재 frameCount={frameCount}).");
         WriteCamerasJson();
         framesWriter = new StreamWriter(Path.Combine(outDir, "frames.jsonl"), false, new UTF8Encoding(false));
         recording = true;
@@ -137,6 +160,7 @@ public class SimRecorder : MonoBehaviour
     {
         if (framesWriter != null && recording) framesWriter.Dispose();
         if (rt != null) rt.Release();
+        visibility?.Release();
         Time.captureFramerate = 0;
     }
 
@@ -227,6 +251,8 @@ public class SimRecorder : MonoBehaviour
         long ts = startTsMs + (long)frame * (1000 / framerate);
         var sb = new StringBuilder();
         sb.Append("{\"frame\": ").Append(frame).Append(", \"ts\": ").Append(ts).Append(", \"objects\": [");
+        var vis1 = visibility?.Measure(cam1);
+        var vis2 = visibility?.Measure(cam2);
 
         bool first = true;
         foreach (var obj in Tracked.All)
@@ -245,13 +271,36 @@ public class SimRecorder : MonoBehaviour
             first = false;
             sb.Append("{\"object_id\": \"").Append(obj.objectId).Append("\", \"cls\": \"").Append(obj.cls)
               .Append("\", \"world\": ").Append(Vec(obj.GroundPoint(b)))
-              .Append(", \"bbox\": {").Append(string.Join(", ", boxes)).Append("}}");
+              .Append(", \"bbox\": {").Append(string.Join(", ", boxes)).Append("}");
+            var mover = obj.GetComponent<WaypointMover>();
+            sb.Append(", \"moving\": ").Append(mover != null && mover.IsMoving ? "true" : "false");
+            if (visibility != null)
+                sb.Append(", \"visible_ratio\": {\"cam1\": ").Append(Ratio(vis1, obj))
+                  .Append(", \"cam2\": ").Append(Ratio(vis2, obj)).Append("}");
+            if (obj.TryGetAnkles(out Vector3 la, out Vector3 ra))
+                sb.Append(", \"ankles\": {\"world\": {\"left\": ").Append(Vec(la)).Append(", \"right\": ").Append(Vec(ra)).Append("}")
+                  .Append(", \"cam1\": ").Append(AnklePx(cam1, la, ra))
+                  .Append(", \"cam2\": ").Append(AnklePx(cam2, la, ra)).Append("}");
+            sb.Append("}");
         }
         sb.Append("]}");
         framesWriter.WriteLine(sb.ToString());
     }
 
     readonly List<Vector3> bboxPoints = new List<Vector3>();
+
+    static string Ratio(Dictionary<Tracked, float> vis, Tracked obj) =>
+        vis != null && vis.TryGetValue(obj, out float r) ? F(r) : "null";   // null = 이 카메라 화면에 없음
+
+    /// <summary>양 발목의 이미지 좌표 (1920x1080, 좌상단 원점). 화면 밖이어도 그대로, 카메라 뒤면 null.</summary>
+    static string AnklePx(Camera cam, Vector3 left, Vector3 right) =>
+        "{\"left\": " + Px(cam, left) + ", \"right\": " + Px(cam, right) + "}";
+
+    static string Px(Camera cam, Vector3 p)
+    {
+        Vector3 sp = cam.WorldToScreenPoint(p);
+        return sp.z <= 0f ? "null" : $"[{F(sp.x)}, {F(Height - sp.y)}]";
+    }
 
     static void BoundsCorners(Bounds b, List<Vector3> points)
     {

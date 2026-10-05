@@ -16,10 +16,25 @@ public class WaypointMover : MonoBehaviour
         public Stop(float x, float z, float wait = 0f) { xz = new Vector2(x, z); this.wait = wait; }
     }
 
+    /// <summary>시간 지정 키프레임: 시각 t(초)에 바닥 좌표 xz에 있고, 사이는 직선 보간.</summary>
+    public struct Key
+    {
+        public float t;
+        public Vector2 xz;
+        public Key(float t, float x, float z) { this.t = t; xz = new Vector2(x, z); }
+    }
+
     public List<Stop> stops = new List<Stop>();
+    [Tooltip("비어 있지 않으면 stops/speed 대신 이 키프레임(시간 오름차순)으로 이동. 같은 좌표를 두 번 쓰면 그 사이는 정지.")]
+    public List<Key> keys = new List<Key>();
     public float speed = 1f;
     public float startDelay;
     public float groundY;
+    [Tooltip("true면 웨이포인트 사이를 걷지 않고 순간이동한다 (정지 장면용). 항상 대기 자세.")]
+    public bool teleport;
+
+    /// <summary>마지막 Apply에서 이동 중이었는지 (frames.jsonl의 moving).</summary>
+    public bool IsMoving { get; private set; }
 
     Animator[] animators;
     Vector3 lastPos;
@@ -30,6 +45,7 @@ public class WaypointMover : MonoBehaviour
 
     public void Apply(float t)
     {
+        if (keys.Count > 0) { ApplyKeys(t); return; }
         if (stops.Count == 0) return;
         float time = t - startDelay;
         Vector2 pos = stops[0].xz;
@@ -47,7 +63,7 @@ public class WaypointMover : MonoBehaviour
             {
                 Vector2 from = stops[i - 1].xz, to = stops[i].xz;
                 float len = Vector2.Distance(from, to);
-                float travel = len / speed;
+                float travel = teleport ? 0f : len / speed;
                 dir = len > 1e-4f ? (to - from) / len : dir;
                 haveDir = haveDir || len > 1e-4f;
                 if (remaining < travel)
@@ -69,13 +85,47 @@ public class WaypointMover : MonoBehaviour
         }
 
         var newPos = new Vector3(pos.x, groundY, pos.y);
+        bool moving = !teleport && hasLast && (newPos - lastPos).sqrMagnitude > 1e-8f;
+        lastPos = newPos;
+        hasLast = true;
+        transform.position = newPos;
+        IsMoving = moving;
+        SetMoving(moving);
+        if (haveDir && dir.sqrMagnitude > 1e-6f)
+            transform.rotation = Quaternion.LookRotation(new Vector3(dir.x, 0f, dir.y), Vector3.up);
+    }
+
+    void ApplyKeys(float t)
+    {
+        Vector2 pos = keys[keys.Count - 1].xz;
+        Vector2 dir = Vector2.zero;   // 직전(없으면 첫) 이동 구간의 방향
+        Vector2 firstDir = Vector2.zero;
+        bool placed = t <= keys[0].t;
+        if (placed) pos = keys[0].xz;
+        for (int i = 1; i < keys.Count; i++)
+        {
+            Vector2 from = keys[i - 1].xz, to = keys[i].xz;
+            float len = Vector2.Distance(from, to);
+            Vector2 d = len > 1e-4f ? (to - from) / len : Vector2.zero;
+            if (firstDir == Vector2.zero) firstDir = d;
+            if (!placed && t <= keys[i].t)
+            {
+                float span = keys[i].t - keys[i - 1].t;
+                pos = span > 1e-6f ? Vector2.Lerp(from, to, (t - keys[i - 1].t) / span) : to;
+                placed = true;
+            }
+            if (keys[i - 1].t <= t && d != Vector2.zero) dir = d;
+        }
+        if (dir == Vector2.zero) dir = firstDir;
+
+        var newPos = new Vector3(pos.x, groundY, pos.y);
         bool moving = hasLast && (newPos - lastPos).sqrMagnitude > 1e-8f;
         lastPos = newPos;
         hasLast = true;
         transform.position = newPos;
+        IsMoving = moving;
         SetMoving(moving);
-        if (haveDir && dir.sqrMagnitude > 1e-6f)
-            transform.rotation = Quaternion.LookRotation(new Vector3(dir.x, 0f, dir.y), Vector3.up);
+        if (dir != Vector2.zero) transform.rotation = Quaternion.LookRotation(new Vector3(dir.x, 0f, dir.y), Vector3.up);
     }
 
     /// <summary>자식 Animator에 bool 파라미터 "Moving"이 있으면 이동 중 여부를 전달 (걷기/대기 전환).</summary>

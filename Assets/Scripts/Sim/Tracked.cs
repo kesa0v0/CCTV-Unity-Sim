@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>정답 데이터(frames.jsonl)에 기록할 오브젝트. cls: person, chair, cart, desk.</summary>
+/// <summary>정답 데이터(frames.jsonl)에 기록할 오브젝트. cls: person, chair, cart, desk, backpack.</summary>
 public class Tracked : MonoBehaviour
 {
     public static readonly List<Tracked> All = new List<Tracked>();
@@ -11,6 +11,9 @@ public class Tracked : MonoBehaviour
 
     [Tooltip("true면 transform.position(피벗=발)을 world로 쓴다. false면 렌더러 bounds 아래면 중심.")]
     public bool pivotIsGround;
+
+    [Tooltip("true면 스킨 메시가 없어도 MeshFilter 메시 꼭짓점 전체로 bbox를 만든다 (bounds 8꼭짓점보다 타이트). 메시가 Read/Write 가능해야 함.")]
+    public bool useMeshVertices;
 
     /// <summary>부모의 자식마다 Tracked를 붙인다. cls = 이름에서 추정, id = cls_번호(하이어라키 순서대로 1부터).</summary>
     public static void AutoAddChildren(Transform root)
@@ -23,10 +26,11 @@ public class Tracked : MonoBehaviour
             string cls = lower.Contains("chair") ? "chair"
                        : lower.Contains("desk") || lower.Contains("table") ? "desk"
                        : lower.Contains("cart") ? "cart"
+                       : lower.Contains("backpack") ? "backpack"
                        : lower.Contains("person") ? "person" : null;
             if (cls == null)
             {
-                Debug.LogWarning($"Tracked: '{child.name}'의 cls를 알 수 없어 건너뜀 (이름에 desk/chair/cart/person 포함 필요)");
+                Debug.LogWarning($"Tracked: '{child.name}'의 cls를 알 수 없어 건너뜀 (이름에 desk/chair/cart/backpack/person 포함 필요)");
                 continue;
             }
             var t = child.gameObject.AddComponent<Tracked>();
@@ -38,6 +42,8 @@ public class Tracked : MonoBehaviour
     }
 
     Mesh bakeMesh;
+    Transform leftAnkle, rightAnkle;
+    bool anklesSearched;
     readonly List<Vector3> localVerts = new List<Vector3>();
 
     void OnEnable() { All.Add(this); }
@@ -46,13 +52,13 @@ public class Tracked : MonoBehaviour
 
     /// <summary>
     /// SkinnedMeshRenderer가 있으면 현재 포즈를 BakeMesh로 구워 모든 꼭짓점을 월드 좌표로 담는다
-    /// (같은 오브젝트의 일반 MeshFilter 메시도 포함). 스킨 메시가 없으면 false — bounds 방식을 쓴다.
+    /// (같은 오브젝트의 일반 MeshFilter 메시도 포함). 스킨 메시가 없고 useMeshVertices도 꺼져 있으면 false — bounds 방식을 쓴다.
     /// </summary>
     public bool TryGetPoseVertices(List<Vector3> worldVerts)
     {
         worldVerts.Clear();
         var skinned = GetComponentsInChildren<SkinnedMeshRenderer>();
-        if (skinned.Length == 0) return false;
+        if (skinned.Length == 0 && !useMeshVertices) return false;
 
         if (bakeMesh == null) bakeMesh = new Mesh();
         foreach (var smr in skinned)
@@ -73,6 +79,26 @@ public class Tracked : MonoBehaviour
             foreach (var v in localVerts) worldVerts.Add(m.MultiplyPoint3x4(v));
         }
         return worldVerts.Count > 0;
+    }
+
+    /// <summary>
+    /// 양 발목 관절의 월드 좌표. Mixamo 리그의 "...LeftFoot"/"...RightFoot" 뼈 원점(= 발목 관절)을 쓴다.
+    /// 해당 뼈가 없으면 false.
+    /// </summary>
+    public bool TryGetAnkles(out Vector3 left, out Vector3 right)
+    {
+        if (!anklesSearched)
+        {
+            anklesSearched = true;
+            foreach (var t in GetComponentsInChildren<Transform>())
+            {
+                if (leftAnkle == null && t.name.EndsWith("LeftFoot")) leftAnkle = t;
+                else if (rightAnkle == null && t.name.EndsWith("RightFoot")) rightAnkle = t;
+            }
+        }
+        left = leftAnkle != null ? leftAnkle.position : default;
+        right = rightAnkle != null ? rightAnkle.position : default;
+        return leftAnkle != null && rightAnkle != null;
     }
 
     public bool TryGetBounds(out Bounds bounds)

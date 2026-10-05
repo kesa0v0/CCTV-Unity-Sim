@@ -1745,6 +1745,11 @@ MonoBehaviour:
   furnitureRoot: {fileID: 1482546884}
   personPrefab: {fileID: 919132149155446097, guid: d3b44865f1cfdbb49bbd8f9401f206fb, type: 3}
   personController: {fileID: 9100000, guid: 8141b983665804a9bafbfd1702b8ce31, type: 2}
+  cartPrefab: {fileID: 0}
+  backpackPrefab: {fileID: 919132149155446097, guid: 6213125c369179841ac4edb91e6ab45c, type: 3}
+  recordVisibility: 1
+  visibilityDownscale: 2
+  idMaskShader: {fileID: 0}
 --- !u!1 &2000000010
 GameObject:
   m_ObjectHideFlags: 0

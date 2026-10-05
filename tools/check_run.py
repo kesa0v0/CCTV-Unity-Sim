@@ -3,6 +3,7 @@
 사용: python tools/check_run.py unity_runs/unity-classroom-01 [--frames 1,5,10]
 - 빨간 박스 = frames.jsonl 의 정답 bbox
 - 초록 십자 = world 좌표를 cameras.json 으로 직접 재투영한 점 (bbox 아랫변 중앙 근처에 와야 정상)
+- 파란 점 = 기록된 발목 화면 좌표 (ankles), 박스 라벨 옆 v=가려짐 비율 (visible_ratio)
 """
 import argparse
 import json
@@ -84,6 +85,40 @@ def main():
     else:
         problems.append("기록된 오브젝트/bbox가 없음 (Tracked 없음, 또는 카메라에 안 보임)")
 
+    # 사람 world(캐릭터 피벗) ↔ 두 발목 가운데 바닥 거리, 발목 화면 좌표 재투영 일치
+    offs = {True: [], False: []}
+    ank_err = []
+    for fr in frames:
+        for ob in fr["objects"]:
+            ank = ob.get("ankles")
+            if not ank:
+                continue
+            l, r = ank["world"]["left"], ank["world"]["right"]
+            mid = ((l[0] + r[0]) / 2, (l[2] + r[2]) / 2)
+            offs[ob.get("moving", False)].append(math.dist(mid, (ob["world"][0], ob["world"][2])))
+            for cid in cams:
+                for side, w in (("left", l), ("right", r)):
+                    rec, pt = ank[cid][side], project(cams[cid], w)
+                    if rec and pt:
+                        ank_err.append(math.dist(rec, pt))
+    for mv, v in offs.items():
+        if v:
+            v.sort()
+            print(f"world ↔ 두 발목 가운데 (바닥 거리, {'걷는 중' if mv else '정지'}): "
+                  f"평균 {100 * sum(v) / len(v):.1f}cm, 중앙값 {100 * v[len(v) // 2]:.1f}cm, 최대 {100 * v[-1]:.1f}cm ({len(v)}개)")
+    if ank_err and max(ank_err) > 2:
+        problems.append(f"발목 화면 좌표가 cameras.json 재투영과 다름 (최대 {max(ank_err):.1f}px)")
+
+    # 가려짐 비율 요약
+    vis = {}
+    for fr in frames:
+        for ob in fr["objects"]:
+            for cid, v in (ob.get("visible_ratio") or {}).items():
+                if v is not None:
+                    vis.setdefault((ob["object_id"], cid), []).append(v)
+    for (oid, cid), v in sorted(vis.items()):
+        print(f"visible_ratio {oid} {cid}: 평균 {sum(v) / len(v):.2f}, 최소 {min(v):.2f}, 0.5 미만 {sum(x < 0.5 for x in v)}프레임")
+
     ids = sorted({o["object_id"] for fr in frames for o in fr["objects"]})
     print("오브젝트:", ", ".join(ids) or "(없음)")
 
@@ -102,7 +137,13 @@ def main():
                 bb = ob["bbox"].get(cid)
                 if bb:
                     dr.rectangle(bb, outline=(255, 40, 40), width=3)
-                    dr.text((bb[0] + 4, bb[1] + 4), f'{ob["object_id"]} ({ob["cls"]})', fill=(255, 255, 0))
+                    v = (ob.get("visible_ratio") or {}).get(cid)
+                    label = f'{ob["object_id"]} ({ob["cls"]})' + (f" v={v:.2f}" if v is not None else "")
+                    dr.text((bb[0] + 4, bb[1] + 4), label, fill=(255, 255, 0))
+                for side in ("left", "right"):
+                    ap = ((ob.get("ankles") or {}).get(cid) or {}).get(side)
+                    if ap:
+                        dr.ellipse([ap[0] - 6, ap[1] - 6, ap[0] + 6, ap[1] + 6], fill=(40, 120, 255))
                 pt = project(cam, ob["world"])
                 if pt:
                     dr.line([pt[0] - 12, pt[1], pt[0] + 12, pt[1]], fill=(0, 255, 0), width=3)
