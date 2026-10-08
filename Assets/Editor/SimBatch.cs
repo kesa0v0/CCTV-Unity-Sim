@@ -6,7 +6,8 @@ using UnityEngine;
 /// <summary>
 /// 커맨드라인에서 시나리오 하나를 녹화하고 에디터를 종료한다 (씬은 저장하지 않음).
 /// Unity.exe -batchmode -projectPath unity-sim -executeMethod SimBatch.Run
-///           -simScenario S1 -simSession unity-classroom-03-s1 -simFrames 300
+///           -simScenario 0 -simRound 2 [-simSession unity-grid-sc0-r2] [-simFps 15]
+/// 프레임 수는 시나리오 길이로 정해진다. 세션 이름을 빼면 unity-grid-sc{N}(-r{R}).
 /// -nographics를 붙이면 렌더링이 안 되므로 붙이지 않는다.
 /// </summary>
 [InitializeOnLoad]
@@ -39,11 +40,12 @@ public static class SimBatch
             return;
         }
 
-        rec.scenario = (SimScenario)Enum.Parse(typeof(SimScenario), Arg("-simScenario", rec.scenario.ToString()));
-        rec.sessionName = Arg("-simSession", rec.sessionName);
-        rec.frameCount = int.Parse(Arg("-simFrames", rec.frameCount.ToString()));
+        rec.scenario = int.Parse(Arg("-simScenario", rec.scenario.ToString()));
+        rec.round = int.Parse(Arg("-simRound", "1"));
+        rec.sessionName = Arg("-simSession", $"unity-grid-sc{rec.scenario}" + (rec.scenario == 0 ? $"-r{rec.round}" : ""));
+        rec.framerate = int.Parse(Arg("-simFps", "15"));
         rec.quitWhenDone = true;
-        Debug.Log($"SimBatch: {rec.scenario} → {rec.sessionName} ({rec.frameCount}프레임)");
+        Debug.Log($"SimBatch: 시나리오 {rec.scenario} (회차 {rec.round}) → {rec.sessionName} ({rec.framerate}fps)");
 
         SessionState.SetBool(ActiveKey, true);
         EditorApplication.EnterPlaymode();

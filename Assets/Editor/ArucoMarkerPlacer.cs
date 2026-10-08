@@ -2,7 +2,7 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Assets/ArChu의 ArUco 마커를 A4(210x297mm) 크기로 바닥 2장 + 맞은편 벽 2장 + 옆벽 2장 배치한다.
+/// Assets/ArChu의 ArUco 마커를 A4(210x297mm) 크기로 바닥 4장 + 맞은편 벽 2장 배치한다.
 /// 메뉴: Tools/Place ArUco Markers (다시 실행하면 기존 "ArucoMarkers" 루트를 교체)
 /// 방 좌표: X 0~10.58, Z 0~8.57, 원점 = 바닥 모서리. 카메라는 z=0쪽 모서리에서 +Z를 본다.
 /// </summary>
@@ -17,15 +17,16 @@ public static class ArucoMarkerPlacer
 
     static readonly Spot[] Spots =
     {
-        // 바닥: 책상 줄 사이 빈 통로
-        new Spot(0, new Vector3(3.5f, Lift, 4.0f), false),
-        new Spot(1, new Vector3(7.0f, Lift, 4.0f), false),
-        // 벽: 카메라 맞은편 벽(z=8.57), 눈높이
-        new Spot(2, new Vector3(3.5f, 1.5f, 8.57f - Lift), true),
-        new Spot(3, new Vector3(7.0f, 1.0f, 8.57f - Lift), true),
-        // 옆벽: 반대편 카메라에서만 보임 (x=0 벽은 cam2, x=10.58 벽은 cam1)
-        new Spot(4, new Vector3(Lift, 1.0f, 5.5f), true, -90f),
-        new Spot(5, new Vector3(10.58f - Lift, 1.2f, 6.0f), true, 90f),
+        // 바닥 4장: 격자(4m × 4m, 방 가운데)와 카메라 사이에 연 모양으로. 격자 옆·뒤 바닥은 먼 카메라에서 10px 안팎이라 쓰지 않는다.
+        // 0번 = rel 좌표 원점, 격자 C1에서 1m 앞 (A1 = rel (-2, 1)). 그림 위쪽이 +Z(먼 벽)를 향한다
+        // 1·6번은 각자 가까운 카메라에서 크게(약 89x58px), 7번은 두 카메라에서 같은 크기로 보인다
+        new Spot(0, new Vector3(5.29f, Lift, 1.285f), false),   // rel (0, 0)
+        new Spot(1, new Vector3(6.79f, Lift, 0.285f), false),   // rel (1.5, -1)
+        new Spot(6, new Vector3(3.79f, Lift, 0.285f), false),   // rel (-1.5, -1)
+        new Spot(7, new Vector3(5.29f, Lift, 1.785f), false),   // rel (0, 0.5) — 격자 C1과 0.5m
+        // 벽 2장 (보정용): 두 카메라에 모두 보이는 카메라 맞은편 벽(z=8.57), 높이를 다르게
+        new Spot(2, new Vector3(4.29f, 0.8f, 8.57f - Lift), true),   // rel (-1, 7.285, 0.8)
+        new Spot(3, new Vector3(6.29f, 1.4f, 8.57f - Lift), true),   // rel (1, 7.285, 1.4)
     };
 
     [MenuItem("Tools/Place ArUco Markers")]

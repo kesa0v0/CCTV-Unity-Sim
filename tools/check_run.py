@@ -64,9 +64,12 @@ def main():
         if fr["frame"] != i + 1:
             problems.append(f"frame 번호 불연속: index {i} -> {fr['frame']}")
             break
+    # ts = 시작 + round((frame-1) * 1000 / fps). fps는 events.json(없으면 예전 기본값 10)
+    events_path = run / "events.json"
+    fps = json.loads(events_path.read_text(encoding="utf-8"))["fps"] if events_path.exists() else 10
     for i in range(1, n):
-        if frames[i]["ts"] - frames[i - 1]["ts"] != 100:
-            problems.append(f"ts 간격이 100ms가 아님 (frame {frames[i]['frame']})")
+        if frames[i]["ts"] - frames[0]["ts"] != round(i * 1000 / fps):
+            problems.append(f"ts가 {fps}fps 간격이 아님 (frame {frames[i]['frame']})")
             break
 
     # 재투영 오차: world 의 재투영점이 bbox 안(가로) / 아랫변 근처에 있는지
